@@ -30,6 +30,11 @@ app.use(cors({
   credentials: true,
 }));
 
+// ── Health check — must be first, before any auth or DB middleware ──
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString(), env: process.env.NODE_ENV });
+});
+
 // ── Paystack webhook needs raw body ───────────────────────────────
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
@@ -48,11 +53,6 @@ app.use(rateLimit({
   max: 200,
   message: { success: false, message: 'Too many requests' },
 }));
-
-// ── Health check ──────────────────────────────────────────────────
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), env: process.env.NODE_ENV });
-});
 
 // ── API Routes ────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
@@ -75,12 +75,17 @@ const PORT = process.env.PORT || 5000;
 
 const start = async () => {
   try {
-    await redis.connect();
-    logger.info('Redis connected');
+    // Try Redis but don't crash if unavailable
+    try {
+      await redis.connect();
+      logger.info('Redis connected');
+    } catch (redisErr) {
+      logger.warn('Redis unavailable — continuing without cache. Set REDIS_URL to enable.');
+    }
 
     cronJobs.init();
 
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       logger.info(`Link API running on port ${PORT} in ${process.env.NODE_ENV} mode`);
     });
   } catch (err) {
