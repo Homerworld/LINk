@@ -1,49 +1,75 @@
 const logger = require('../utils/logger');
 
-// Extract just the redis:// URL — handles case where someone pastes the full CLI command
-const rawUrl = (process.env.REDIS_URL || '');
-const match = rawUrl.match(/(rediss?:\/\/\S+)/);
-const redisUrl = match ? match[1] : (rawUrl.startsWith('redis') ? rawUrl : null);
+// Dummy no-op client used when Redis is unavailable
+const noop = async () => null;
+const noopFalse = async () => false;
 
-let client = null;
-
-if (redisUrl) {
-  try {
-    const { createClient } = require('redis');
-    client = createClient({ url: redisUrl });
-    client.on('error', (err) => logger.warn('Redis error: ' + err.message));
-    client.on('connect', () => logger.info('Redis connected'));
-  } catch (e) {
-    logger.warn('Redis client init failed: ' + e.message);
-    client = null;
-  }
-}
+let redisEnabled = false;
+let redisClient = null;
 
 const connect = async () => {
-  if (!client) { logger.warn('Redis not configured — running without cache'); return; }
-  try { await client.connect(); }
-  catch (e) { logger.warn('Redis connect failed: ' + e.message); client = null; }
+  const url = (process.env.REDIS_URL || '').trim();
+  if (!url || url === 'redis://localhost:6379') {
+    logger.warn('Redis not configured — running without cache');
+    return;
+  }
+
+  // Extract just the redis:// or rediss:// URL if someone pasted a CLI command
+  const match = url.match(/(rediss?:\/\/\S+)/);
+  const cleanUrl = match ? match[1] : url;
+
+  try {
+    const { createClient } = require('redis');
+    redisClient = createClient({
+      url: cleanUrl,
+      socket: {
+        reconnectStrategy: (retries) => {
+          if (retries > 3) {
+            logger.warn('Redis: max retries reached, disabling cache');
+            redisEnabled = false;
+            return false; // stop reconnecting
+          }
+          return Math.min(retries * 500, 2000);
+        }
+      }
+    });
+    redisClient.on('error', (err) => logger.warn('Redis error: ' + err.message));
+    redisClient.on('connect', () => { redisEnabled = true; logger.info('Redis connected'); });
+    redisClient.on('end', () => { redisEnabled = false; });
+    await redisClient.connect();
+  } catch (e) {
+    logger.warn('Redis unavailable: ' + e.message);
+    redisEnabled = false;
+    redisClient = null;
+  }
 };
 
 const set = async (key, value, ttlSeconds) => {
-  if (!client) return;
+  if (!redisEnabled || !redisClient) return;
   try {
     const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
-    if (ttlSeconds) { await client.setEx(key, ttlSeconds, s); }
-    else { await client.set(key, s); }
-  } catch (e) { /* skip */ }
+    if (ttlSeconds) { await redisClient.setEx(key, ttlSeconds, s); }
+    else { await redisClient.set(key, s); }
+  } catch { /* skip */ }
 };
 
 const get = async (key) => {
-  if (!client) return null;
+  if (!redisEnabled || !redisClient) return null;
   try {
-    const value = await client.get(key);
+    const value = await redisClient.get(key);
     if (!value) return null;
     try { return JSON.parse(value); } catch { return value; }
-  } catch (e) { return null; }
+  } catch { return null; }
 };
 
-const del = async (key) => { if (!client) return null; try { return client.del(key); } catch { return null; } };
-const exists = async (key) => { if (!client) return false; try { return client.exists(key); } catch { return false; } };
+const del = async (key) => {
+  if (!redisEnabled || !redisClient) return null;
+  try { return redisClient.del(key); } catch { return null; }
+};
 
-module.exports = { connect, set, get, del, exists, client };
+const exists = async (key) => {
+  if (!redisEnabled || !redisClient) return false;
+  try { return redisClient.exists(key); } catch { return false; }
+};
+
+module.exports = { connect, set, get, del, exists };
