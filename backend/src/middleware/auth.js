@@ -1,28 +1,36 @@
 const jwt = require('jsonwebtoken');
-const { error } = require('../utils/response');
+const { fail } = require('../utils/response');
 
 const authenticate = (req, res, next) => {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
-    return error(res, 'Authentication required', 401);
+    return fail(res, 'Authentication required', 401);
   }
-
-  const token = header.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    const token = header.split(' ')[1];
+    req.user = jwt.verify(token, process.env.JWT_SECRET);
     next();
-  } catch (err) {
-    return error(res, 'Invalid or expired token', 401);
+  } catch {
+    return fail(res, 'Invalid or expired token', 401);
   }
 };
 
 const requireRole = (...roles) => (req, res, next) => {
-  if (!req.user) return error(res, 'Authentication required', 401);
-  if (!roles.includes(req.user.role)) {
-    return error(res, 'Access denied', 403);
-  }
+  if (!roles.includes(req.user?.role)) return fail(res, 'Access denied', 403);
   next();
 };
 
-module.exports = { authenticate, requireRole };
+const signTokens = (user) => ({
+  accessToken: jwt.sign(
+    { userId: user.id, role: user.role, phone: user.phone },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
+  ),
+  refreshToken: jwt.sign(
+    { userId: user.id },
+    process.env.JWT_REFRESH_SECRET,
+    { expiresIn: '90d' }
+  ),
+});
+
+module.exports = { authenticate, requireRole, signTokens };
