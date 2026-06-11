@@ -9,6 +9,10 @@ const logger = require('./utils/logger');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Railway (and most hosts) run behind a reverse proxy. This tells Express
+// to trust the first proxy hop so express-rate-limit can read the real client IP.
+app.set('trust proxy', 1);
+
 // Track boot status so we can report it
 const bootStatus = { firebase: false, seeded: false, error: null };
 
