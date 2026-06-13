@@ -1,91 +1,77 @@
-import axios from 'axios'
-import * as SecureStore from 'expo-secure-store'
+import axios from 'axios';
+import Constants from 'expo-constants';
+import * as SecureStore from 'expo-secure-store';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000/api'
+const API_URL =
+  (Constants.expoConfig?.extra as any)?.apiUrl ||
+  'https://link-production-49d3.up.railway.app/api';
 
-const api = axios.create({ baseURL: API_URL, timeout: 15000 })
+const api = axios.create({ baseURL: API_URL, timeout: 20000 });
 
 api.interceptors.request.use(async (config) => {
-  const token = await SecureStore.getItemAsync('accessToken')
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
-})
+  const token = await SecureStore.getItemAsync('accessToken');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
 
-api.interceptors.response.use(
-  res => res,
-  async (err) => {
-    if (err.response?.status === 401) {
-      await SecureStore.deleteItemAsync('accessToken')
-      await SecureStore.deleteItemAsync('refreshToken')
-    }
-    return Promise.reject(err)
-  }
-)
+// Unwrap { success, message, data } envelope; surface clean errors
+const ok = (res: any) => res.data?.data ?? res.data;
+const err = (e: any) => {
+  const msg = e.response?.data?.message || e.message || 'Something went wrong';
+  throw new Error(msg);
+};
 
-// Auth
 export const authAPI = {
-  sendOtp: (phone: string, purpose = 'signup') => api.post('/auth/otp/send', { phone, purpose }),
-  verifyOtp: (phone: string, code: string, purpose = 'signup') => api.post('/auth/otp/verify', { phone, code, purpose }),
-  customerSignup: (data: any) => api.post('/auth/signup/customer', data),
-  vendorSignup: (data: any) => api.post('/auth/signup/vendor', data),
-  login: (phone: string, password: string) => api.post('/auth/login', { phone, password }),
-  refresh: (refreshToken: string) => api.post('/auth/refresh', { refreshToken }),
-  setPin: (pin: string) => api.post('/auth/pin', { pin }),
-  updatePushToken: (token: string) => api.post('/auth/push-token', { token }),
-  getMe: () => api.get('/auth/me'),
-}
+  signupCustomer: (b: any) => api.post('/auth/signup/customer', b).then(ok).catch(err),
+  signupVendor: (b: any) => api.post('/auth/signup/vendor', b).then(ok).catch(err),
+  login: (phone: string, password: string) =>
+    api.post('/auth/login', { phone, password }).then(ok).catch(err),
+  me: () => api.get('/auth/me').then(ok).catch(err),
+  setPin: (pin: string) => api.post('/auth/pin', { pin }).then(ok).catch(err),
+};
 
-// Search
 export const searchAPI = {
-  autocomplete: (q: string) => api.get(`/search/autocomplete?q=${q}`),
-  searchVendors: (params: any) => api.get('/search/vendors', { params }),
-  getVendor: (id: string) => api.get(`/search/vendor/${id}`),
-  getServices: () => api.get('/search/services'),
-}
+  services: () => api.get('/search/services').then(ok).catch(err),
+  autocomplete: (q: string) => api.get(`/search/autocomplete?q=${encodeURIComponent(q)}`).then(ok).catch(err),
+  vendors: (params: any) => api.get('/search/vendors', { params }).then(ok).catch(err),
+  vendor: (id: string) => api.get(`/search/vendor/${id}`).then(ok).catch(err),
+};
 
-// Offers
-export const offersAPI = {
-  create: (data: any) => api.post('/offers', data),
-  respond: (id: string, data: any) => api.post(`/offers/${id}/respond`, data),
-  getMine: (status?: string) => api.get('/offers/mine', { params: { status } }),
-  get: (id: string) => api.get(`/offers/${id}`),
-}
+export const offerAPI = {
+  create: (b: any) => api.post('/offers', b).then(ok).catch(err),
+  mine: (status?: string) => api.get('/offers/mine', { params: { status } }).then(ok).catch(err),
+  get: (id: string) => api.get(`/offers/${id}`).then(ok).catch(err),
+  respond: (id: string, b: any) => api.post(`/offers/${id}/respond`, b).then(ok).catch(err),
+};
 
-// Payments
-export const paymentsAPI = {
-  initiate: (offer_id: string) => api.post('/payments/initiate', { offer_id }),
-  verify: (reference: string) => api.get(`/payments/verify/${reference}`),
-  getBanks: () => api.get('/payments/banks'),
-  devConfirm: (reference: string) => api.post(`/payments/dev-confirm/${reference}`),
-}
+export const paymentAPI = {
+  initiate: (offerId: string) => api.post('/payments/initiate', { offerId }).then(ok).catch(err),
+  devConfirm: (reference: string) => api.post(`/payments/dev-confirm/${reference}`).then(ok).catch(err),
+  banks: () => api.get('/payments/banks').then(ok).catch(err),
+};
 
-// Jobs
-export const jobsAPI = {
-  getMine: (params?: any) => api.get('/jobs', { params }),
-  get: (id: string) => api.get(`/jobs/${id}`),
-  markComplete: (id: string) => api.post(`/jobs/${id}/complete`),
-  confirm: (id: string) => api.post(`/jobs/${id}/confirm`),
-  dispute: (id: string, data: any) => api.post(`/jobs/${id}/dispute`, data),
-  review: (id: string, data: any) => api.post(`/jobs/${id}/review`, data),
-}
+export const jobAPI = {
+  mine: (status?: string) => api.get('/jobs', { params: { status } }).then(ok).catch(err),
+  get: (id: string) => api.get(`/jobs/${id}`).then(ok).catch(err),
+  complete: (id: string) => api.post(`/jobs/${id}/complete`).then(ok).catch(err),
+  confirm: (id: string) => api.post(`/jobs/${id}/confirm`).then(ok).catch(err),
+  dispute: (id: string, b: any) => api.post(`/jobs/${id}/dispute`, b).then(ok).catch(err),
+  review: (id: string, b: any) => api.post(`/jobs/${id}/review`, b).then(ok).catch(err),
+};
 
-// Wallet
 export const walletAPI = {
-  get: () => api.get('/wallet'),
-  getTransactions: () => api.get('/wallet/transactions'),
-  withdraw: (amount: number, pin: string) => api.post('/wallet/withdraw', { amount, pin }),
-}
+  get: () => api.get('/wallet').then(ok).catch(err),
+  transactions: () => api.get('/wallet/transactions').then(ok).catch(err),
+  withdraw: (amount: number, pin: string) => api.post('/wallet/withdraw', { amount, pin }).then(ok).catch(err),
+};
 
-// KYC
 export const kycAPI = {
-  getStatus: () => api.get('/kyc/status'),
-  submitIdentity: (data: any) => api.post('/kyc/identity', data),
-  uploadIdDocument: (formData: FormData) => api.post('/kyc/id-document', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  uploadSelfie: (formData: FormData) => api.post('/kyc/selfie', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  addServices: (service_ids: string[]) => api.post('/kyc/services', { service_ids }),
-  uploadPortfolio: (formData: FormData) => api.post('/kyc/portfolio', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  updateLocation: (data: any) => api.post('/kyc/location', data),
-  submit: () => api.post('/kyc/submit'),
-}
+  status: () => api.get('/kyc/status').then(ok).catch(err),
+  identity: (b: any) => api.post('/kyc/identity', b).then(ok).catch(err),
+  services: (services: string[]) => api.post('/kyc/services', { services }).then(ok).catch(err),
+  location: (b: any) => api.post('/kyc/location', b).then(ok).catch(err),
+  submit: () => api.post('/kyc/submit').then(ok).catch(err),
+};
 
-export default api
+export { API_URL };
+export default api;

@@ -1,45 +1,53 @@
-import React, { useState } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native'
-import { useDispatch } from 'react-redux'
-import { loginUser, AppDispatch } from '../../store'
-import { Colors } from '../../constants/theme'
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, SafeAreaView, Alert, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import { Button, Field } from '../../components/ui';
+import { Colors, Spacing } from '../../constants/theme';
+import { authAPI } from '../../services/api';
+import { useAuth } from '../../store/auth';
 
 export default function LoginScreen({ navigation }: any) {
-  const dispatch = useDispatch<AppDispatch>()
-  const [phone, setPhone] = useState('')
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+  const { signIn } = useAuth();
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
-    if (!phone || !password) { Alert.alert('Error', 'Enter phone and password'); return }
-    setLoading(true)
-    const result = await dispatch(loginUser({ phone, password }))
-    if (loginUser.rejected.match(result)) Alert.alert('Login failed', result.payload as string)
-    setLoading(false)
-  }
+  const submit = async () => {
+    if (!phone || !password) return Alert.alert('Missing info', 'Enter your phone and password.');
+    setLoading(true);
+    try {
+      const { user, accessToken, refreshToken } = await authAPI.login(phone.trim(), password);
+      await signIn(user, accessToken, refreshToken);
+    } catch (e: any) {
+      Alert.alert('Login failed', e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <View style={s.c}>
-      <Text style={s.logo}>Link</Text>
-      <Text style={s.title}>Welcome back</Text>
-      <TextInput style={s.input} placeholder="Phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" autoComplete="tel" />
-      <TextInput style={s.input} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />
-      <TouchableOpacity style={s.btn} onPress={handleLogin} disabled={loading}>
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.btnTxt}>Sign In</Text>}
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.goBack()}>
-        <Text style={s.link}>Create an account</Text>
-      </TouchableOpacity>
-    </View>
-  )
+    <SafeAreaView style={s.c}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <View style={s.body}>
+          <Text style={s.logo}>Link</Text>
+          <Text style={s.title}>Welcome back</Text>
+          <View style={{ gap: Spacing.base, marginTop: Spacing.lg }}>
+            <Field label="Phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="08012345678" />
+            <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry placeholder="Your password" />
+            <Button title="Sign in" onPress={submit} loading={loading} style={{ marginTop: Spacing.sm }} />
+            <TouchableOpacity onPress={() => navigation.navigate('Welcome')}>
+              <Text style={s.link}>New here? Create an account</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
 }
 
 const s = StyleSheet.create({
-  c: { flex: 1, backgroundColor: Colors.background, padding: 32, justifyContent: 'center', gap: 12 },
-  logo: { fontSize: 40, fontWeight: '900', color: Colors.primary, letterSpacing: -1, marginBottom: 8 },
-  title: { fontSize: 28, fontWeight: '800', color: Colors.textPrimary, marginBottom: 8 },
-  input: { height: 52, borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12, paddingHorizontal: 16, fontSize: 15, backgroundColor: '#fff' },
-  btn: { height: 56, backgroundColor: Colors.primary, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
-  btnTxt: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  link: { textAlign: 'center', color: Colors.primary, fontWeight: '600', fontSize: 14 },
-})
+  c: { flex: 1, backgroundColor: Colors.background },
+  body: { flex: 1, justifyContent: 'center', padding: Spacing.xl },
+  logo: { fontSize: 40, fontWeight: '900', color: Colors.primary, letterSpacing: -1 },
+  title: { fontSize: 26, fontWeight: '800', color: Colors.textPrimary, marginTop: Spacing.sm },
+  link: { textAlign: 'center', color: Colors.primary, fontWeight: '600', fontSize: 14, marginTop: Spacing.sm },
+});

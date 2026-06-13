@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Link",
+    "slug": "link",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#4F46E5"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "app.link.marketplace"
+    },
+    "extra": {
+      "apiUrl": "https://link-production-49d3.up.railway.app/api"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Link uses your location to show vendors near you."
+        }
+      ]
+    ]
+  }
+}
