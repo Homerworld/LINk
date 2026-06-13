@@ -1,0 +1,131 @@
+const admin = require('firebase-admin');
+
+let db;
+
+const initFirebase = () => {
+  if (admin.apps.length > 0) {
+    db = admin.firestore();
+    return;
+  }
+
+  let privateKey = process.env.FIREBASE_PRIVATE_KEY || null;
+  if (privateKey) {
+    // Strip wrapping quotes Railway/shells sometimes keep, then turn \n into real newlines
+    privateKey = privateKey.trim().replace(/^["']|["']$/g, '').replace(/\\n/g, '\n');
+  }
+
+  if (!privateKey || !process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL) {
+    throw new Error('Missing Firebase environment variables: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY');
+  }
+
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey,
+    }),
+  });
+
+  db = admin.firestore();
+  db.settings({ ignoreUndefinedProperties: true });
+};
+
+const getDb = () => {
+  if (!db) throw new Error('Firebase not initialized');
+  return db;
+};
+
+// Firestore helpers
+const collection = (name) => getDb().collection(name);
+
+// Convert Firestore Timestamp fields to ISO strings so clients (and JS Date
+// sorting) can read them. Applied on every read path.
+const normalize = (data) => {
+  const out = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (v && typeof v === 'object' && typeof v.toDate === 'function') {
+      out[k] = v.toDate().toISOString();
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+};
+
+const getDoc = async (col, id) => {
+  const doc = await collection(col).doc(id).get();
+  if (!doc.exists) return null;
+  return { id: doc.id, ...normalize(doc.data()) };
+};
+
+const setDoc = async (col, id, data) => {
+  await collection(col).doc(id).set({ ...data, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  return { id, ...data };
+};
+
+const addDoc = async (col, data) => {
+  const ref = await collection(col).add({
+    ...data,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return { id: ref.id, ...data };
+};
+
+const updateDoc = async (col, id, data) => {
+  await collection(col).doc(id).update({ ...data, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+  return { id, ...data };
+};
+
+const deleteDoc = async (col, id) => {
+  await collection(col).doc(id).delete();
+};
+
+const queryDocs = async (col, conditions = [], orderBy = null, limit = null) => {
+  let ref = collection(col);
+  for (const [field, op, value] of conditions) {
+    ref = ref.where(field, op, value);
+  }
+  if (orderBy) {
+    // Accept either 'field' or ['field', 'desc']
+    const [field, dir] = Array.isArray(orderBy) ? orderBy : [orderBy, 'asc'];
+    ref = ref.orderBy(field, dir || 'asc');
+  }
+  if (limit) ref = ref.limit(limit);
+  const snap = await ref.get();
+  return snap.docs.map(d => ({ id: d.id, ...normalize(d.data()) }));
+};
+
+const serverTimestamp = () => admin.firestore.FieldValue.serverTimestamp();
+const increment = (n) => admin.firestore.FieldValue.increment(n);
+
+// Run a Firestore transaction. The callback receives the native transaction
+// plus small typed helpers so balance changes are atomic (read + write inside
+// the same transaction, with automatic retries on contention).
+const runTransaction = async (fn) => {
+  const db = getDb();
+  return db.runTransaction(async (tx) => {
+    const ref = (col, id) => db.collection(col).doc(id);
+    const txGet = async (col, id) => {
+      const snap = await tx.get(ref(col, id));
+      if (!snap.exists) return null;
+      return { id: snap.id, ...snap.data() };
+    };
+    const txUpdate = (col, id, data) =>
+      tx.update(ref(col, id), { ...data, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+    const txSet = (col, id, data) =>
+      tx.set(ref(col, id), { ...data, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    const txCreate = (col, data) => {
+      const docRef = db.collection(col).doc();
+      tx.set(docRef, {
+        ...data,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { id: docRef.id, ...data };
+    };
+    return fn(tx, { txGet, txUpdate, txSet, txCreate, ref });
+  });
+};
+
+module.exports = { initFirebase, getDb, collection, getDoc, setDoc, addDoc, updateDoc, deleteDoc, queryDocs, serverTimestamp, increment, runTransaction };
